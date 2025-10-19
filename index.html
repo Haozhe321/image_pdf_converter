@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Converter Toolkit</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Inter Font -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Container for Image-to-PDF (needs fixed height for Cropper.js to work) */
+        .img-container {
+            max-width: 100%;
+            height: 400px; 
+            background: #f7f7f7;
+            overflow: hidden; /* Cropping tool handles overflow internally */
+            display: block; /* Important for Cropper.js */
+        }
+        .img-container img { 
+            max-width: 100%; 
+            height: auto; 
+            display: block;
+        }
+
+        /* Container for PDF-to-Image (No fixed height, allows content to push height) */
+        .pdf-preview {
+            max-width: 100%;
+            min-height: 150px; 
+            max-height: 70vh; 
+            background: #f7f7f7;
+            overflow-y: auto; 
+            display: flex;
+            align-items: flex-start; 
+            justify-content: center;
+            padding: 1rem; 
+        }
+        
+        /* Style for the canvas used in PDF rendering */
+        #pdfCanvas { 
+            max-width: 100%; 
+            height: auto; 
+            border: 1px solid #ccc; 
+            display: block;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+        }
+    </style>
+    <!-- Load Cropper.js CSS (now fully used) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" />
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+
+    <div id="app-container" class="w-full max-w-2xl bg-white shadow-2xl rounded-xl p-8 space-y-6">
+
+        <h1 class="text-3xl font-extrabold text-gray-800 text-center">File Converter Toolkit</h1>
+        <p class="text-center text-gray-600">Select your conversion below to begin.</p>
+        
+        <!-- Tool Selector (Dropdown) -->
+        <div class="space-y-2">
+            <label for="toolSelector" class="block text-sm font-medium text-gray-700">Select Conversion Type</label>
+            <select id="toolSelector" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-base py-2 px-3 border">
+                <option value="image-to-pdf-tool">Image → PDF (Multi-page, Cropping)</option>
+                <option value="pdf-to-image-tool">PDF → Image (Page 1 only)</option>
+            </select>
+        </div>
+        
+        <!-- Status Message Area -->
+        <div id="statusMessage" class="text-center p-3 rounded-lg hidden"></div>
+
+        <!-- --- Image to PDF Tool --- -->
+        <div id="image-to-pdf-tool" class="tool-view space-y-4">
+            <h2 class="text-xl font-semibold text-gray-700">Image to PDF Converter</h2>
+            
+            <div id="file-select-area" class="space-y-4">
+                <label for="imageFile" class="block text-sm font-medium text-gray-700">Select Image(s) (JPG/PNG)</label>
+                <!-- NOTE: The 'multiple' attribute allows uploading all images at once -->
+                <input type="file" id="imageFile" accept="image/jpeg, image/png" multiple
+                    class="block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-full file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-indigo-50 file:text-indigo-700
+                    hover:file:bg-indigo-100"
+                />
+            </div>
+
+            <!-- New Layout Selector -->
+            <div class="space-y-2">
+                <label class="block text-sm font-medium text-gray-700">PDF Layout Options</label>
+                <div class="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 p-3 bg-white border border-gray-300 rounded-lg shadow-sm">
+                    <label class="flex items-center">
+                        <input type="radio" name="pdfLayout" value="multi-page" checked id="layoutMultiPage" class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300">
+                        <span class="ml-2 text-sm text-gray-700">Multi-Page (One image per A4 sheet)</span>
+                    </label>
+                    <label class="flex items-center">
+                        <input type="radio" name="pdfLayout" value="single-page" id="layoutSinglePage" class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300">
+                        <span class="ml-2 text-sm text-gray-700">Single-Page (All images on one sheet)</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Uploaded Files List and Cropping Controls -->
+            <div id="uploadedFilesList" class="space-y-3 p-3 bg-gray-100 rounded-lg shadow-inner hidden">
+                <div id="image-selection-controls" class="flex items-center justify-between">
+                    <button id="prevImgBtn" class="px-3 py-1 bg-white text-indigo-700 border border-indigo-300 rounded-lg text-sm disabled:opacity-50 hover:bg-indigo-50 transition" disabled>&lt; Previous</button>
+                    <span id="currentImgStatus" class="text-sm font-bold text-gray-700 text-center flex-1 mx-2">No Image Selected</span>
+                    <button id="nextImgBtn" class="px-3 py-1 bg-white text-indigo-700 border border-indigo-300 rounded-lg text-sm disabled:opacity-50 hover:bg-indigo-50 transition" disabled>Next &gt;</button>
+                </div>
+            </div>
+
+            <div id="img-preview-area" class="hidden space-y-4">
+                 <div class="img-container rounded-lg border-2 border-gray-200 p-4 shadow-md">
+                    <img id="imageToConvert" src="" alt="Image Preview" class="max-w-full max-h-full" />
+                </div>
+                <p class="text-xs text-gray-500 text-center">Adjust the cropping box above for the current image. Use the navigation to save the crop and move to the next image.</p>
+            </div>
+
+            <button id="convertImgBtn"
+                    data-state="generate"
+                    class="w-full flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out disabled:opacity-50"
+                    disabled>
+                <svg id="convertImgIcon" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Generate PDF
+            </button>
+        </div>
+
+        <!-- --- PDF to Image Tool --- -->
+        <div id="pdf-to-image-tool" class="tool-view space-y-4 hidden">
+            <h2 class="text-xl font-semibold text-gray-700">PDF to Image (PNG)</h2>
+
+            <div class="space-y-4">
+                <label for="pdfFile" class="block text-sm font-medium text-gray-700">Select PDF File</label>
+                <input type="file" id="pdfFile" accept="application/pdf" class="block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-full file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-indigo-50 file:text-indigo-700
+                    hover:file:bg-indigo-100"
+                />
+            </div>
+
+            <div id="pdf-preview-area" class="pdf-preview rounded-lg border-2 border-gray-200 hidden">
+                <canvas id="pdfCanvas" class="shadow-lg"></canvas>
+            </div>
+            <p id="pdfPageInfo" class="text-sm text-gray-500 text-center hidden">Rendering page 1 of 1</p>
+
+            <button id="convertPdfBtn"
+                    data-state="generate"
+                    class="w-full flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out disabled:opacity-50"
+                    disabled>
+                <svg id="convertPdfIcon" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Generate PNG from Page 1
+            </button>
+        </div>
+
+    </div>
+
+    <!-- Load jsPDF library from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- Load PDF.js Libraries from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>
+        // Set the worker source path for PDF.js (required for it to function correctly)
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        if (pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        }
+    </script>
+    <!-- Load Cropper.js Libraries from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
+
+    <script type="module">
+        // Import the jsPDF namespace
+        const { jsPDF } = window.jspdf;
+
+        // --- DOM Elements ---
+        const toolSelector = document.getElementById('toolSelector');
+        const convertImgBtn = document.getElementById('convertImgBtn');
+        const convertPdfBtn = document.getElementById('convertPdfBtn');
+        const statusMessage = document.getElementById('statusMessage');
+        const convertImgIcon = document.getElementById('convertImgIcon');
+        const convertPdfIcon = document.getElementById('convertPdfIcon');
+
+        const imageFile = document.getElementById('imageFile');
+        const imageToConvert = document.getElementById('imageToConvert');
+        const imgPreviewArea = document.getElementById('img-preview-area');
+        
+        const pdfFile = document.getElementById('pdfFile');
+        const pdfCanvas = document.getElementById('pdfCanvas');
+        const pdfPreviewArea = document.getElementById('pdf-preview-area');
+        const pdfPageInfo = document.getElementById('pdfPageInfo');
+        
+        // Layout selector
+        const layoutMultiPage = document.getElementById('layoutMultiPage');
+        const layoutSinglePage = document.getElementById('layoutSinglePage');
+
+        // Elements for Multi-File Cropping
+        const uploadedFilesList = document.getElementById('uploadedFilesList');
+        const currentImgStatus = document.getElementById('currentImgStatus');
+        const prevImgBtn = document.getElementById('prevImgBtn');
+        const nextImgBtn = document.getElementById('nextImgBtn');
+
+
+        // --- Global State ---
+        let currentFileName = 'document'; // Base name for download
+        let pdfData = null; // Stores the loaded PDF document object (PDF.js)
+        let generatedPdfData = null; // Stores the generated PDF data URL (jsPDF output)
+        let generatedPngData = null; // Stores the generated PNG data URL (Canvas output)
+        let cropper = null; // Stores the Cropper.js instance
+
+        // State for Multi-File
+        let uploadedFiles = []; // Stores File objects selected by user
+        let processedImages = []; // Stores { name, dataUrl, cropBoxData, width, height } for each image
+        let currentImageIndex = -1; // Index of the image currently in the cropper
+
+        // --- Constants ---
+        const A4_WIDTH_MM = 210;
+        const A4_HEIGHT_MM = 297;
+        const A4_MARGIN_MM = 10; // 1 cm margin on all sides
+        const PDF_TYPE_JPEG = 'JPEG'; // Use JPEG for smaller output PDF size
+
+        /**
+         * Utility function to update the status message box.
+         */
+        function updateStatus(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.className = 'text-center p-3 rounded-lg block'; // Reset classes
+            
+            switch (type) {
+                case 'success':
+                    statusMessage.classList.add('bg-green-100', 'text-green-800');
+                    break;
+                case 'error':
+                    statusMessage.classList.add('bg-red-100', 'text-red-800');
+                    break;
+                case 'info':
+                default:
+                    statusMessage.classList.add('bg-blue-100', 'text-blue-800');
+            }
+        }
+
+        /**
+         * Switches the active tool view based on the dropdown selection.
+         */
+        function switchToolView(viewId) {
+            document.querySelectorAll('.tool-view').forEach(view => {
+                view.classList.add('hidden');
+            });
+            document.getElementById(viewId).classList.remove('hidden');
+            updateStatus('Select a file to begin conversion.', 'info');
+            
+            // Reset fields and previews when switching tools
+            if (viewId === 'image-to-pdf-tool') {
+                resetImageToPdfTool();
+                updateConvertButtonText(); // Update button text initially
+            } else if (viewId === 'pdf-to-image-tool') {
+                resetPdfToImageTool();
+            }
+        }
+        
+        /**
+         * Updates the text on the main conversion button based on the selected layout.
+         */
+        function updateConvertButtonText() {
+            const layout = document.querySelector('input[name="pdfLayout"]:checked').value;
+            const text = (layout === 'multi-page') ? 'Generate Multi-Page PDF' : 'Generate Single-Page PDF';
+            convertImgBtn.textContent = text;
+        }
+        
+        // Listeners for layout change to update button text
+        layoutMultiPage.addEventListener('change', updateConvertButtonText);
+        layoutSinglePage.addEventListener('change', updateConvertButtonText);
+
+
+        /**
+         * Resets state for Image to PDF tool.
+         */
+        function resetImageToPdfTool() {
+            imageFile.value = ''; // Clear file input
+            imageToConvert.src = '';
+            imgPreviewArea.classList.add('hidden');
+            uploadedFilesList.classList.add('hidden'); // Hide controls
+            convertImgBtn.disabled = true;
+            convertImgBtn.dataset.state = 'generate';
+            generatedPdfData = null;
+            
+            // Reset Multi-File State
+            uploadedFiles = [];
+            processedImages = [];
+            currentImageIndex = -1;
+            updateConvertButtonText(); // Reset button text
+
+            // Destroy Cropper instance if it exists
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+        }
+
+        /**
+         * Resets state for PDF to Image tool.
+         */
+        function resetPdfToImageTool() {
+            pdfFile.value = ''; // Clear file input
+            pdfData = null;
+            pdfPreviewArea.classList.add('hidden');
+            pdfPageInfo.classList.add('hidden');
+            convertPdfBtn.disabled = true;
+            convertPdfBtn.textContent = 'Generate PNG from Page 1';
+            convertPdfBtn.dataset.state = 'generate';
+            generatedPngData = null;
+        }
+
+        // Handle dropdown change
+        toolSelector.addEventListener('change', (e) => {
+            switchToolView(e.target.value);
+        });
+
+        // --- Image to PDF Multi-File Logic ---
+
+        /**
+         * Loads the image at currentImageIndex into the cropper preview.
+         */
+        function loadCurrentImage() {
+            if (currentImageIndex < 0 || currentImageIndex >= uploadedFiles.length) {
+                imgPreviewArea.classList.add('hidden');
+                currentImgStatus.textContent = 'No Image Selected';
+                convertImgBtn.disabled = true;
+                if (cropper) cropper.destroy();
+                cropper = null;
+                return;
+            }
+
+            const file = uploadedFiles[currentImageIndex];
+            currentImgStatus.textContent = `Cropping Image ${currentImageIndex + 1} of ${uploadedFiles.length}: ${file.name}`;
+            imgPreviewArea.classList.remove('hidden');
+            convertImgBtn.disabled = false;
+            
+            // Destroy previous cropper instance
+            if (cropper) cropper.destroy();
+            cropper = null;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imageToConvert.src = e.target.result;
+                
+                // Initialize Cropper on the new image element
+                cropper = new Cropper(imageToConvert, {
+                    aspectRatio: NaN,
+                    viewMode: 1,
+                    dragMode: 'move',
+                    autoCropArea: 0.9,
+                    responsive: true,
+                    ready() {
+                        // Apply previous crop data if available
+                        const savedCrop = processedImages[currentImageIndex]?.cropBoxData;
+                        if (savedCrop) {
+                            cropper.setCropBoxData(savedCrop);
+                        }
+                    }
+                });
+            };
+            reader.readAsDataURL(file);
+
+            // Update navigation button states
+            prevImgBtn.disabled = currentImageIndex === 0;
+            // The 'Next' button should only be enabled if there are more images to process
+            nextImgBtn.disabled = currentImageIndex === uploadedFiles.length - 1; 
+        }
+
+        /**
+         * Captures the crop box and cropped image data for the current image and stores it.
+         */
+        function updateProcessedImage() {
+            if (!cropper || currentImageIndex === -1) return;
+
+            // 1. Get the cropped canvas data URL
+            const croppedCanvas = cropper.getCroppedCanvas({
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+            });
+            
+            // Use JPEG data URL for smaller PDF size
+            const croppedDataURL = croppedCanvas.toDataURL('image/jpeg', 0.9);
+            
+            // 2. Store the processed data and the crop box data for persistence/generation
+            processedImages[currentImageIndex] = {
+                name: uploadedFiles[currentImageIndex].name,
+                dataUrl: croppedDataURL,
+                cropBoxData: cropper.getCropBoxData(),
+                width: croppedCanvas.width,
+                height: croppedCanvas.height
+            };
+        }
+        
+        // Navigation listeners
+        prevImgBtn.addEventListener('click', () => {
+            if (currentImageIndex > 0) {
+                updateProcessedImage(); // Save current crop before moving
+                currentImageIndex--;
+                loadCurrentImage();
+            }
+        });
+
+        nextImgBtn.addEventListener('click', () => {
+            if (currentImageIndex < uploadedFiles.length - 1) {
+                updateProcessedImage(); // Save current crop before moving
+                currentImageIndex++;
+                loadCurrentImage();
+            }
+        });
+
+        /**
+         * Handles image file selection.
+         */
+        imageFile.addEventListener('change', () => {
+            // Filter only valid image files
+            const files = Array.from(imageFile.files).filter(file => file.type.startsWith('image/'));
+            
+            if (files.length === 0) {
+                resetImageToPdfTool();
+                updateStatus('Please select one or more image files.', 'info');
+                return;
+            }
+
+            uploadedFiles = files;
+            // Initialize processedImages array to track state for all files
+            processedImages = new Array(files.length).fill(null); 
+            // Base filename for the downloaded PDF
+            currentFileName = files.length === 1 ? files[0].name.split('.').slice(0, -1).join('.') : 'multi_image_document'; 
+
+            uploadedFilesList.classList.remove('hidden');
+
+            // Start with the first image
+            currentImageIndex = 0;
+            loadCurrentImage();
+            
+            // Note: Next button automatically disabled/enabled by loadCurrentImage.
+            updateStatus(`Loaded ${files.length} images. Crop Image 1. Use 'Next' if you have more images.`, 'info');
+        });
+        
+        /**
+         * Ensures an image at a given index has dataURL and dimensions saved in processedImages.
+         * If processedImages[index] is null, it treats the original file as the 'crop'.
+         * @param {number} index
+         * @returns {Promise<void>}
+         */
+        function ensureImageIsProcessed(index) {
+            return new Promise((resolve, reject) => {
+                // If already processed (cropped or saved as full), resolve immediately
+                if (processedImages[index] !== null) {
+                    return resolve();
+                }
+
+                const file = uploadedFiles[index];
+                if (!file) return reject(new Error("File not found at index: " + index));
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const dataUrl = e.target.result;
+                    const img = new Image();
+                    img.onload = () => {
+                        // Save the full original image as the processed image (uncropped)
+                        processedImages[index] = {
+                            name: file.name,
+                            dataUrl: dataUrl,
+                            cropBoxData: null, // Indicates no explicit crop was performed
+                            width: img.width,
+                            height: img.height
+                        };
+                        resolve();
+                    };
+                    img.onerror = reject;
+                    img.src = dataUrl;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+        
+        /**
+         * Places images on separate A4 pages (Multi-Page Layout).
+         * @param {jsPDF} doc The jsPDF document instance.
+         * @param {Array} validImages Array of processed image data.
+         */
+        function renderMultiPagePdf(doc, validImages) {
+            validImages.forEach((imgData, index) => {
+                // Add a new page only for the 2nd image and beyond (jsPDF starts with 1 page)
+                if (index > 0) {
+                    doc.addPage('a4', 'portrait');
+                }
+                
+                const originalWidth = imgData.width;
+                const originalHeight = imgData.height;
+                const imageAspectRatio = originalWidth / originalHeight;
+
+                // Standard A4 Logic (Centered with 10mm margin)
+                const margin = A4_MARGIN_MM;
+                const printableWidth = A4_WIDTH_MM - (2 * margin);
+                const printableHeight = A4_HEIGHT_MM - (2 * margin);
+
+                let imgWidth = printableWidth;
+                let imgHeight = imgWidth / imageAspectRatio;
+
+                // Scale down if height exceeds printable area
+                if (imgHeight > printableHeight) {
+                    imgHeight = printableHeight;
+                    imgWidth = imgHeight * imageAspectRatio;
+                }
+                
+                // Calculate position for centering (in MM)
+                const x_pos = margin + (printableWidth - imgWidth) / 2;
+                const y_pos = margin + (printableHeight - imgHeight) / 2;
+
+                // Embed Cropped Image
+                doc.addImage(imgData.dataUrl, PDF_TYPE_JPEG, x_pos, y_pos, imgWidth, imgHeight);
+            });
+        }
+        
+        /**
+         * Places all images onto a single A4 page (Single-Page Layout), stacked vertically.
+         * @param {jsPDF} doc The jsPDF document instance.
+         * @param {Array} validImages Array of processed image data.
+         */
+        function renderSinglePagePdf(doc, validImages) {
+            const margin = A4_MARGIN_MM;
+            const printableWidth = A4_WIDTH_MM - (2 * margin);
+            const printableHeight = A4_HEIGHT_MM - (2 * margin);
+            
+            const numImages = validImages.length;
+            const cellHeight = printableHeight / numImages;
+            
+            let currentY = margin;
+
+            validImages.forEach((imgData) => {
+                const originalWidth = imgData.width;
+                const originalHeight = imgData.height;
+                const imageAspectRatio = originalWidth / originalHeight;
+                
+                // Determine max width and height for this cell
+                const maxWidth = printableWidth;
+                const maxHeight = cellHeight;
+                
+                let imgWidth = maxWidth;
+                let imgHeight = imgWidth / imageAspectRatio;
+                
+                // Scale down if the height exceeds the assigned cell height
+                if (imgHeight > maxHeight) {
+                    imgHeight = maxHeight;
+                    imgWidth = imgHeight * imageAspectRatio;
+                }
+                
+                // Calculate horizontal position for centering within printable area
+                const x_pos = margin + (printableWidth - imgWidth) / 2;
+                
+                // Calculate vertical position for centering within its cell slot
+                const y_pos_in_cell = (cellHeight - imgHeight) / 2;
+                const y_pos = currentY + y_pos_in_cell;
+
+                // Embed Cropped Image
+                doc.addImage(imgData.dataUrl, PDF_TYPE_JPEG, x_pos, y_pos, imgWidth, imgHeight);
+
+                // Move Y position down for the next image
+                currentY += cellHeight; 
+            });
+        }
+
+
+        /**
+         * Converts ALL loaded images (cropped areas) to a PDF based on the selected layout.
+         */
+        convertImgBtn.addEventListener('click', async () => {
+            if (convertImgBtn.dataset.state === 'download' && generatedPdfData) {
+                // --- DOWNLOAD ACTION: RESTORED ---
+                const a = document.createElement('a');
+                a.href = generatedPdfData;
+                a.download = `${currentFileName}_converted.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                updateStatus('PDF is downloading...', 'success');
+                return;
+            }
+
+            // --- GENERATE ACTION ---
+            
+            // 1. Ensure the crop for the currently visible image is saved
+            if (cropper) {
+                updateProcessedImage(); 
+            }
+            
+            // 2. Ensure ALL uploaded files are processed (even those not manually viewed/cropped)
+            const processingPromises = uploadedFiles.map((_, index) => ensureImageIsProcessed(index));
+            
+            const layoutMode = document.querySelector('input[name="pdfLayout"]:checked').value;
+            const statusText = (layoutMode === 'multi-page') 
+                ? `Preparing ${uploadedFiles.length} image(s) and creating Multi-Page PDF...` 
+                : `Preparing ${uploadedFiles.length} image(s) and creating Single-Page PDF...`;
+            
+            convertImgBtn.disabled = true;
+            convertImgIcon.classList.remove('hidden');
+            convertImgBtn.textContent = 'Processing...';
+            updateStatus(statusText, 'info');
+
+            try {
+                // Wait for all images (cropped or uncropped original) to be saved to processedImages
+                await Promise.all(processingPromises);
+
+                // Filter out any errors (shouldn't happen if promises resolve)
+                const validImages = processedImages.filter(img => img !== null);
+
+                if (validImages.length === 0) {
+                    throw new Error("No valid images were processed. Please check file formats.");
+                }
+
+                // Initialize PDF Document
+                const doc = new jsPDF({
+                    orientation: 'portrait',
+                    unit: 'mm',
+                    format: 'a4'
+                });
+                
+                if (layoutMode === 'multi-page') {
+                    renderMultiPagePdf(doc, validImages);
+                } else {
+                    renderSinglePagePdf(doc, validImages);
+                }
+
+                // Store data URI for non-automatic download
+                generatedPdfData = doc.output('datauristring');
+                
+                const successMsg = (layoutMode === 'multi-page') 
+                    ? `Multi-Page PDF generated! Total pages: ${validImages.length}. Click Download PDF to save the file.`
+                    : `Single-Page PDF generated! ${validImages.length} images combined. Click Download PDF to save the file.`;
+
+                // Update Button State to Download
+                convertImgBtn.textContent = 'Download PDF';
+                convertImgBtn.dataset.state = 'download';
+                updateStatus(successMsg, 'success');
+
+            } catch (error) {
+                console.error("Image to PDF Conversion Error:", error);
+                updateStatus(`Error during PDF creation: ${error.message}`, 'error');
+                updateConvertButtonText(); // Reset text on error
+            } finally {
+                convertImgBtn.disabled = false;
+                convertImgIcon.classList.add('hidden');
+            }
+        });
+
+
+        // --- PDF to Image Logic (Unchanged) ---
+        
+        /**
+         * Renders the first page of the PDF onto the canvas.
+         */
+        async function renderPdfPage(pdfDoc) {
+            pdfData = pdfDoc;
+            const pageNumber = 1; // Always render the first page for this simple tool
+
+            pdfPageInfo.textContent = `Rendering page ${pageNumber} of ${pdfDoc.numPages}...`;
+            pdfPageInfo.classList.remove('hidden');
+            
+            // Ensure the container is visible BEFORE calculating its clientWidth
+            pdfPreviewArea.classList.remove('hidden');
+            
+            const page = await pdfDoc.getPage(pageNumber);
+            
+            // Calculate scale to fit canvas container
+            const viewport = page.getViewport({ scale: 1 });
+            // Read container width after making it visible
+            const containerWidth = pdfPreviewArea.clientWidth; 
+            // If clientWidth is 0, default to a scale of 1 for minimum size.
+            const scale = containerWidth > 0 ? (containerWidth - 32) / viewport.width : 1; // Subtract padding (2rem = 32px)
+            
+            const scaledViewport = page.getViewport({ scale: scale });
+
+            pdfCanvas.height = scaledViewport.height;
+            pdfCanvas.width = scaledViewport.width;
+            
+            // Render the PDF page into the canvas context
+            const context = pdfCanvas.getContext('2d');
+            const renderContext = {
+                canvasContext: context,
+                viewport: scaledViewport
+            };
+            
+            await page.render(renderContext).promise;
+            
+            convertPdfBtn.disabled = false;
+            convertPdfBtn.textContent = 'Generate PNG from Page 1'; // Ready to generate
+            updateStatus('PDF page loaded. Click Generate to create PNG.', 'info');
+        }
+
+        /**
+         * Handles PDF file selection and calls the renderer.
+         */
+        pdfFile.addEventListener('change', async () => {
+            const file = pdfFile.files[0];
+            resetPdfToImageTool(); // Reset state on new file selection
+
+            if (!file) {
+                return;
+            }
+
+            currentFileName = file.name.split('.').slice(0, -1).join('.');
+            convertPdfBtn.disabled = true;
+            pdfPageInfo.classList.add('hidden');
+            pdfPreviewArea.classList.add('hidden');
+            updateStatus('Loading PDF document...', 'info');
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const arrayBuffer = e.target.result;
+                try {
+                    // Load the PDF using PDF.js
+                    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                    const pdfDoc = await loadingTask.promise;
+                    await renderPdfPage(pdfDoc);
+                } catch (error) {
+                    console.error("PDF Loading Error:", error);
+                    updateStatus(`Error loading PDF: ${error.message}`, 'error');
+                }
+            };
+            reader.onerror = () => {
+                updateStatus('Failed to read the PDF file.', 'error');
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        /**
+         * Converts the canvas content (rendered PDF page) to an image file or handles download.
+         */
+        convertPdfBtn.addEventListener('click', () => {
+            if (convertPdfBtn.dataset.state === 'download' && generatedPngData) {
+                // --- DOWNLOAD ACTION: RESTORED ---
+                const a = document.createElement('a');
+                a.href = generatedPngData;
+                a.download = `${currentFileName}_page1.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                updateStatus('PNG is downloading...', 'success');
+                return;
+            }
+
+            // --- GENERATE ACTION ---
+            if (!pdfData) {
+                updateStatus('No PDF file loaded.', 'error');
+                return;
+            }
+
+            convertPdfBtn.disabled = true;
+            convertPdfIcon.classList.remove('hidden');
+            convertPdfBtn.textContent = 'Processing...';
+            updateStatus('Converting PDF page to PNG...', 'info');
+
+            try {
+                // The image is already rendered on the canvas; just extract the data URL
+                generatedPngData = pdfCanvas.toDataURL('image/png');
+                
+                // Update Button State to Download
+                convertPdfBtn.textContent = 'Download PNG';
+                convertPdfBtn.dataset.state = 'download';
+                updateStatus('PNG image generated! Click Download PNG to save the file.', 'success');
+
+            } catch (error) {
+                console.error("PDF to Image Conversion Error:", error);
+                updateStatus(`Error during image creation: ${error.message}`, 'error');
+                convertPdfBtn.textContent = 'Generate PNG from Page 1'; // Reset text on error
+            } finally {
+                convertPdfBtn.disabled = false;
+                convertPdfIcon.classList.add('hidden');
+            }
+        });
+
+
+        // --- Initialization ---
+        
+        // Start with the Image to PDF tool open
+        switchToolView(toolSelector.value);
+    </script>
+</body>
+</html>
